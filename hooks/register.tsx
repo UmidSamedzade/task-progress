@@ -20,6 +20,8 @@ const TEXT_GAP = 'sm'
 
 // Until every step is done, small updates stop just short of a full bar.
 const CAP = 99
+// A bar this full when Claude's turn ends is taken as finished.
+const NEARLY_DONE = 95
 
 type Loose = Record<string, unknown>
 
@@ -37,6 +39,7 @@ const GUIDE = [
   'Call it after each small piece of work: `add` takes percentage points of the whole request, sized to the piece (+0.2 for a tiny step, +1, +3, +5 for bigger ones).',
   'Send that call in the same message as your next tool call, never in a message of its own, so it costs no extra round trip.',
   'Finishing a step of your task list moves the bar up on its own; use `set` only to correct it. Skip it for one-line answers.',
+  'When the whole request is done, call it with `set: 100` in the same message as your last tool call, before your final reply: that fills the bar to 100% and ends the countdown. Small `add` steps alone stop at 99%.',
   'ETA (required for any request that takes more than a couple of tool calls): in the same message as your first tool call, pass `eta_seconds`, your honest best guess of the seconds left until the whole request is done; a countdown shows under the bar.',
   'Whenever your guess changes, pass a new `eta_seconds` (longer or shorter) counted from now.',
   'The ETA only informs the user: it is not a deadline. Never rush, skip checks or cut corners to meet it. Do the work properly and update the ETA instead.',
@@ -137,7 +140,11 @@ export const register: Register = on => {
             type: 'number',
             description: 'Percentage points to add, may be fractional, e.g. 0.2, 1, 3, 5.',
           },
-          set: { type: 'number', description: 'Set the bar to this percent, 0 to 100.' },
+          set: {
+            type: 'number',
+            description:
+              'Set the bar to this percent, 0 to 100. Send 100 when the whole request is done: it fills the bar and ends the countdown.',
+          },
           eta_seconds: {
             type: 'number',
             description:
@@ -156,17 +163,35 @@ export const register: Register = on => {
       const args = e as unknown as Loose
       const { value: list = [] } = await $.state.get(TASKS)
       const { value: now = 0 } = await $.state.get(PERCENT)
-      const max = allDone(list) ? 100 : CAP
+      // With no task list, Claude alone says when the work is done.
+      const max = list.length === 0 || allDone(list) ? 100 : CAP
       let percent = now
-      if (typeof args.set === 'number' && Number.isFinite(args.set)) percent = clamp(args.set, max)
-      if (typeof args.add === 'number' && Number.isFinite(args.add)) {
-        percent = clamp(percent + args.add, max)
+      // `set: 100` is Claude saying the whole request is done: the bar fills
+      // and every step is checked off, whatever the list still says.
+      const isDone = typeof args.set === 'number' && args.set >= 100
+      if (isDone) {
+        percent = 100
+        if (list.length > 0) {
+          await $.state.set(
+            TASKS,
+            list.map(t => ({ ...t, status: 'completed' as const })),
+          )
+        }
+      } else {
+        if (typeof args.set === 'number' && Number.isFinite(args.set)) percent = clamp(args.set, max)
+        if (typeof args.add === 'number' && Number.isFinite(args.add)) {
+          percent = clamp(percent + args.add, max)
+        }
       }
       await $.state.set(PERCENT, percent)
       sinceUpdate = 0
+      if (percent >= 100) {
+        await $.state.set(ETA_AT, 0)
+        isCounting = false
+      }
 
       let eta = ''
-      if (typeof args.eta_seconds === 'number' && Number.isFinite(args.eta_seconds)) {
+      if (percent < 100 && typeof args.eta_seconds === 'number' && Number.isFinite(args.eta_seconds)) {
         const seconds = Math.max(0, args.eta_seconds)
         await $.state.set(ETA_AT, (await $.clock.now()) + seconds * 1000)
         isCounting = true
@@ -287,6 +312,26 @@ export const register: Register = on => {
     if (nudge === null) return result
     sinceUpdate = 0
     return { ...result, context: [...(result.context ?? []), nudge] }
+  })
+
+  // When Claude's turn ends the countdown stops: nothing is being worked on.
+  // An answered turn whose steps are all done, or whose bar is at its cap or
+  // has no task list, is finished; one that stops partway keeps its bar.
+  on('turn.complete', async ($, e, next) => {
+    if (e.agentId !== undefined) return next(e)
+
+    const { value: list = [] } = await $.state.get(TASKS)
+    const { value: percent = 0 } = await $.state.get(PERCENT)
+    const isOver =
+      e.reason === 'answer' &&
+      percent > 0 &&
+      percent < 100 &&
+      (allDone(list) || list.length === 0 || percent >= NEARLY_DONE)
+    if (isOver) await $.state.set(PERCENT, 100)
+
+    await $.state.set(ETA_AT, 0)
+    isCounting = false
+    return next(e)
   })
 
   // A new request clears a bar that already reached the end.

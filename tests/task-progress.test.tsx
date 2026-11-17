@@ -1,4 +1,5 @@
 import { expect, test } from 'claude-code/testing'
+import type { TestBody } from 'claude-code/testing'
 
 const BAND = {
   plugin: 'task-progress',
@@ -161,4 +162,100 @@ test('several steps with no task list and no bar get one reminder', async ($, on
   const calls = []
   for (let i = 0; i < 5; i++) calls.push(nudgeOf(await $.tool.call({ tool: 'Bash', command: 'ls' })))
   expect(calls.filter(c => /taking several steps/.test(c)).length).toBe(1)
+})
+
+// Claude's turn ending, as the engine raises it.
+const endTurn = async ($: Parameters<TestBody>[0], reason: 'answer' | 'aborted' = 'answer') =>
+  $.turn.complete({
+    reason,
+    answer: '',
+    durationMs: 0,
+    isAborted: reason === 'aborted',
+    turnId: 'turn-1',
+  })
+
+test('with no task list, the end of the turn finishes the bar and stops the countdown', async ($, on) => {
+  on('tool.call', () => ({ result: {} }))
+  on('turn.complete', () => ({ text: '' }))
+  on('clock.now', () => ({ value: 1_000_000 }))
+  await $.tool.call({ tool: PROGRESS, add: 30, eta_seconds: 60 })
+  await endTurn($)
+
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  expect(fillOf((await ui.find({ type: 'Svg' }))?.props.source)).toBe(1000)
+  expect((await ui.find({ type: 'Text', text: /Finished/ }))?.text).toBe('Finished')
+  expect(await ui.find({ type: 'Text', text: /left|longer/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('a bar Claude ran up to its cap is finished when the turn ends', async ($, on) => {
+  on('tool.call', () => ({ result: {} }))
+  on('turn.complete', () => ({ text: '' }))
+  on('clock.now', () => ({ value: 1_000_000 }))
+  await $.tool.call({ tool: PLAN, items: ITEMS })
+  await $.tool.call({ tool: PROGRESS, add: 500, eta_seconds: 30 })
+  await endTurn($)
+
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  expect((await ui.find({ type: 'Text', text: /Finished/ }))?.text).toBe('Finished')
+  expect(await ui.find({ type: 'Text', text: /left|longer/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('a turn that stops partway keeps its bar but stops the countdown', async ($, on) => {
+  on('tool.call', () => ({ result: {} }))
+  on('turn.complete', () => ({ text: '' }))
+  on('clock.now', () => ({ value: 1_000_000 }))
+  await $.tool.call({ tool: PLAN, items: ITEMS })
+  await $.tool.call({ tool: PLAN, advance: true })
+  await $.tool.call({ tool: PROGRESS, eta_seconds: 120 })
+  await endTurn($)
+
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  expect(fillOf((await ui.find({ type: 'Svg' }))?.props.source)).toBe(333)
+  expect(await ui.find({ type: 'Text', text: /left|longer|Finished/ })).toBeUndefined()
+  expect((await ui.find({ type: 'Text', text: /Crunch numbers/ }))?.text).toBe('Crunch numbers')
+  await ui.unmount()
+})
+
+test('an interrupted turn is not marked finished', async ($, on) => {
+  on('tool.call', () => ({ result: {} }))
+  on('turn.complete', () => ({ text: '' }))
+  on('clock.now', () => ({ value: 1_000_000 }))
+  await $.tool.call({ tool: PROGRESS, add: 40, eta_seconds: 60 })
+  await endTurn($, 'aborted')
+
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  expect(fillOf((await ui.find({ type: 'Svg' }))?.props.source)).toBe(400)
+  expect(await ui.find({ type: 'Text', text: /left|longer|Finished/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('set 100 finishes the bar mid-list and stops the countdown', async ($, on) => {
+  on('tool.call', () => ({ result: {} }))
+  on('clock.now', () => ({ value: 1_000_000 }))
+  await $.tool.call({ tool: PLAN, items: ITEMS })
+  await $.tool.call({ tool: PROGRESS, add: 40, eta_seconds: 60 })
+  const r = await $.tool.call({ tool: PROGRESS, set: 100 })
+  expect(r.result).toBe('Progress: 100%')
+
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  expect(fillOf((await ui.find({ type: 'Svg' }))?.props.source)).toBe(1000)
+  expect((await ui.find({ type: 'Text', text: /Finished/ }))?.text).toBe('Finished')
+  expect(await ui.find({ type: 'Text', text: /left|Gather inputs/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('a nearly full bar with steps left is finished when the turn ends', async ($, on) => {
+  on('tool.call', () => ({ result: {} }))
+  on('turn.complete', () => ({ text: '' }))
+  on('clock.now', () => ({ value: 1_000_000 }))
+  await $.tool.call({ tool: PLAN, items: ITEMS })
+  await $.tool.call({ tool: PROGRESS, add: 98, eta_seconds: 30 })
+  await endTurn($)
+
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  expect(fillOf((await ui.find({ type: 'Svg' }))?.props.source)).toBe(1000)
+  expect((await ui.find({ type: 'Text', text: /Finished/ }))?.text).toBe('Finished')
+  await ui.unmount()
 })

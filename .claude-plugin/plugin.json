@@ -1,6 +1,6 @@
 {
   "name": "task-progress",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A thin progress bar above the prompt that Claude moves as it works, with an ETA countdown and the current step's name",
   "author": {
     "name": "UmidSamedzade",
