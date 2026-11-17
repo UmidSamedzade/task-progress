@@ -328,10 +328,12 @@ export const register: Register = on => {
     // The line under the bar: the countdown on the left, the task name on the right.
     const info =
       eta || task ? (
-        <els.Box flexDirection="row" justifyContent="space-between" columnGap={2}>
+        <els.Box flexDirection="row" width="100%" columnGap={2}>
           <els.Text dimColor wrap="truncate-end">
             {eta ?? ''}
           </els.Text>
+          {/* Takes the spare width, pushing the step name to the right edge. */}
+          <els.Box flexGrow={1} />
           {task ? (
             <els.Box flexShrink={1}>
               <els.Text dimColor wrap="truncate-end">
@@ -355,10 +357,14 @@ export const register: Register = on => {
         `<rect x="0" y="0" width="${fill}" height="${H}" rx="${H / 2}" ry="${H / 2}" fill="${COLOR}"/>` +
         `</svg>`
       return (
-        <els.Box flexDirection="column">
+        <els.Box flexDirection="column" width="100%">
           <els.Svg source={source} alt={alt} />
           {/* A gap above the text drops it toward the bottom of the box. */}
-          {info ? <els.Box marginTop={TEXT_GAP}>{info}</els.Box> : null}
+          {info ? (
+            <els.Box marginTop={TEXT_GAP} width="100%">
+              {info}
+            </els.Box>
+          ) : null}
         </els.Box>
       )
     }
@@ -366,7 +372,7 @@ export const register: Register = on => {
     // The terminal has no Svg: a row of heavy line characters instead.
     const cells = Math.max(1, Math.round((percent / 100) * e.props.bodyColumns))
     return (
-      <els.Box flexDirection="column">
+      <els.Box flexDirection="column" width="100%">
         <els.Text color={COLOR}>{'━'.repeat(cells)}</els.Text>
         {info}
       </els.Box>
