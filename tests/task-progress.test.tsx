@@ -120,8 +120,11 @@ const nudgeOf = (r: { context?: readonly string[] }) => (r.context ?? []).join('
 test('a new task list with no ETA reminds Claude to set one', async ($, on) => {
   on('tool.call', () => ({ result: {} }))
   on('clock.now', () => ({ value: 1_000_000 }))
+  // An ETA may come right after the list in the same message: no reminder yet.
   const r = await $.tool.call({ tool: PLAN, items: ITEMS })
-  expect(nudgeOf(r)).toMatch(/no ETA yet/)
+  expect(nudgeOf(r)).toBe('')
+  const next = await $.tool.call({ tool: 'Bash', command: 'ls' })
+  expect(nudgeOf(next)).toMatch(/no ETA yet/)
 
   // Once an ETA is set, the next call carries no reminder.
   await $.tool.call({ tool: PROGRESS, eta_seconds: 60 })

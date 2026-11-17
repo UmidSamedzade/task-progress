@@ -15,6 +15,9 @@ const TOOL = 'mcp__task-progress__progress'
 // The bar's colour.
 const COLOR = '#D97757'
 
+// The space between the bar and the text under it, in the app.
+const TEXT_GAP = 'md'
+
 // Until every step is done, small updates stop just short of a full bar.
 const CAP = 99
 
@@ -51,6 +54,7 @@ const NUDGE = {
 // How many other tool calls may pass before a reminder.
 const STALE_AFTER = 4
 const NO_BAR_AFTER = 3
+const NO_ETA_AFTER = 2
 
 // "2m 05s left", or a note once the estimate has passed.
 function etaText(msLeft: number): string {
@@ -264,7 +268,9 @@ export const register: Register = on => {
 
     let nudge: string | null = null
     if (isActive) {
-      if (etaAt === 0 && (isNewList || sinceUpdate >= NO_BAR_AFTER)) {
+      // Not on the task list's own call: an ETA sent beside it in the same
+      // message is handled just after, so wait one more call to see.
+      if (etaAt === 0 && !isNewList && sinceUpdate >= NO_ETA_AFTER) {
         nudge = NUDGE.noEta
       } else if (etaAt > 0 && etaAt !== remindedExpiredAt && (await $.clock.now()) > etaAt) {
         nudge = NUDGE.expired
@@ -351,7 +357,8 @@ export const register: Register = on => {
       return (
         <els.Box flexDirection="column">
           <els.Svg source={source} alt={alt} />
-          {info}
+          {/* A gap above the text drops it toward the bottom of the box. */}
+          {info ? <els.Box marginTop={TEXT_GAP}>{info}</els.Box> : null}
         </els.Box>
       )
     }
