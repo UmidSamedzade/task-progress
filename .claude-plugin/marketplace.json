@@ -1,5 +1,21 @@
 {
   "name": "task-progress",
-  "owner": { "name": "UmidSamedzade" },
-  "plugins": [{ "name": "task-progress", "source": "./" }]
+  "description": "The task-progress mod for Claude Code: a progress bar above the prompt",
+  "owner": {
+    "name": "UmidSamedzade",
+    "url": "https://github.com/UmidSamedzade"
+  },
+  "plugins": [
+    {
+      "name": "task-progress",
+      "source": "./",
+      "version": "0.2.0",
+      "description": "A thin progress bar above the prompt that Claude moves as it works, with an ETA countdown and the current step's name",
+      "author": {
+        "name": "UmidSamedzade",
+        "url": "https://github.com/UmidSamedzade"
+      },
+      "homepage": "https://github.com/UmidSamedzade/task-progress"
+    }
+  ]
 }

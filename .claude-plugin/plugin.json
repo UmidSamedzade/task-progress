@@ -1,6 +1,12 @@
 {
   "name": "task-progress",
-  "version": "0.1.0",
-  "description": "A progress bar above the prompt showing how far Claude is through the current task list",
+  "version": "0.2.0",
+  "description": "A thin progress bar above the prompt that Claude moves as it works, with an ETA countdown and the current step's name",
+  "author": {
+    "name": "UmidSamedzade",
+    "url": "https://github.com/UmidSamedzade"
+  },
+  "homepage": "https://github.com/UmidSamedzade/task-progress",
+  "repository": "https://github.com/UmidSamedzade/task-progress",
   "types": "./types/index.d.ts"
 }
