@@ -16,7 +16,7 @@ const TOOL = 'mcp__task-progress__progress'
 const COLOR = '#D97757'
 
 // The space between the bar and the text under it, in the app.
-const TEXT_GAP = 'md'
+const TEXT_GAP = 'sm'
 
 // Until every step is done, small updates stop just short of a full bar.
 const CAP = 99
