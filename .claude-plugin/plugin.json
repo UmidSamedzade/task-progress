@@ -1,0 +1,6 @@
+{
+  "name": "task-progress",
+  "version": "0.1.0",
+  "description": "A progress bar above the prompt showing how far Claude is through the current task list",
+  "types": "./types/index.d.ts"
+}
