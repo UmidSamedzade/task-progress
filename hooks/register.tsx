@@ -34,10 +34,23 @@ const GUIDE = [
   'Call it after each small piece of work: `add` takes percentage points of the whole request, sized to the piece (+0.2 for a tiny step, +1, +3, +5 for bigger ones).',
   'Send that call in the same message as your next tool call, never in a message of its own, so it costs no extra round trip.',
   'Finishing a step of your task list moves the bar up on its own; use `set` only to correct it. Skip it for one-line answers.',
-  'ETA: early in the work, pass `eta_seconds`, your honest best guess of the seconds left until the whole request is done; a countdown shows under the bar.',
+  'ETA (required for any request that takes more than a couple of tool calls): in the same message as your first tool call, pass `eta_seconds`, your honest best guess of the seconds left until the whole request is done; a countdown shows under the bar.',
   'Whenever your guess changes, pass a new `eta_seconds` (longer or shorter) counted from now.',
   'The ETA only informs the user: it is not a deadline. Never rush, skip checks or cut corners to meet it. Do the work properly and update the ETA instead.',
 ].join('\n')
+
+// Reminders the model reads after a tool's result, so every Claude keeps the
+// bar and the ETA up to date without being told.
+const NUDGE = {
+  noEta: `Progress bar: there is no ETA yet. In your next tool-call message, also call \`${TOOL}\` with \`eta_seconds\`: your honest best guess of the seconds left for the whole request. Do not rush to meet it; revise it whenever your guess changes.`,
+  noBar: `Progress bar: this request is taking several steps. In your next tool-call message, also call \`${TOOL}\` with \`add\` for the work done so far and \`eta_seconds\` for an honest guess of the time left.`,
+  stale: `Progress bar: it has not moved for several actions. In your next tool-call message, also call \`${TOOL}\` with \`add\` for the work done since, and a new \`eta_seconds\` if your guess changed.`,
+  expired: `Progress bar: the ETA you gave has passed. In your next tool-call message, also call \`${TOOL}\` with a new honest \`eta_seconds\` for the time left. Keep doing the work properly; do not rush.`,
+}
+
+// How many other tool calls may pass before a reminder.
+const STALE_AFTER = 4
+const NO_BAR_AFTER = 3
 
 // "2m 05s left", or a note once the estimate has passed.
 function etaText(msLeft: number): string {
@@ -94,6 +107,13 @@ function applyPlan(list: Task[], args: Loose): Task[] {
 export const register: Register = on => {
   // Whether a countdown is showing, so the timer redraws only then.
   let isCounting = false
+  // Tool calls since Claude last moved the bar, and in this request.
+  let sinceUpdate = 0
+  let thisRequest = 0
+  // The ETA already reminded about once it passed, and whether the
+  // no-bar reminder went out this request.
+  let remindedExpiredAt = 0
+  let remindedNoBar = false
 
   on('session.start', async ($, e, next) => {
     const { value: etaAt = 0 } = await $.state.get(ETA_AT)
@@ -139,6 +159,7 @@ export const register: Register = on => {
         percent = clamp(percent + args.add, max)
       }
       await $.state.set(PERCENT, percent)
+      sinceUpdate = 0
 
       let eta = ''
       if (typeof args.eta_seconds === 'number' && Number.isFinite(args.eta_seconds)) {
@@ -232,11 +253,41 @@ export const register: Register = on => {
         isCounting = false
       }
     }
-    return result
+
+    // Remind Claude to keep the bar and the ETA up to date.
+    sinceUpdate += 1
+    thisRequest += 1
+    const { value: tasks = [] } = await $.state.get(TASKS)
+    const { value: percent = 0 } = await $.state.get(PERCENT)
+    const { value: etaAt = 0 } = await $.state.get(ETA_AT)
+    const isActive = percent < 100 && (tasks.length > 0 || percent > 0)
+
+    let nudge: string | null = null
+    if (isActive) {
+      if (etaAt === 0 && (isNewList || sinceUpdate >= NO_BAR_AFTER)) {
+        nudge = NUDGE.noEta
+      } else if (etaAt > 0 && etaAt !== remindedExpiredAt && (await $.clock.now()) > etaAt) {
+        nudge = NUDGE.expired
+        remindedExpiredAt = etaAt
+      } else if (sinceUpdate >= STALE_AFTER) {
+        nudge = NUDGE.stale
+      }
+    } else if (percent <= 0 && !remindedNoBar && thisRequest >= NO_BAR_AFTER) {
+      // Several steps in with no task list and no bar at all.
+      nudge = NUDGE.noBar
+      remindedNoBar = true
+    }
+
+    if (nudge === null) return result
+    sinceUpdate = 0
+    return { ...result, context: [...(result.context ?? []), nudge] }
   })
 
   // A new request clears a bar that already reached the end.
   on('prompt.submit', async ($, e, next) => {
+    thisRequest = 0
+    sinceUpdate = 0
+    remindedNoBar = false
     const { value: list = [] } = await $.state.get(TASKS)
     const { value: percent = 0 } = await $.state.get(PERCENT)
     if (allDone(list) || percent >= 100) {

@@ -113,3 +113,49 @@ test('the terminal draws the bar as a line of characters', async ($, on) => {
   expect((await ui.find({ type: 'Text', text: /━/ }))?.text).toBe('━'.repeat(20))
   await ui.unmount()
 })
+
+// The reminder Claude reads after a tool's result, if any.
+const nudgeOf = (r: { context?: readonly string[] }) => (r.context ?? []).join('\n')
+
+test('a new task list with no ETA reminds Claude to set one', async ($, on) => {
+  on('tool.call', () => ({ result: {} }))
+  on('clock.now', () => ({ value: 1_000_000 }))
+  const r = await $.tool.call({ tool: PLAN, items: ITEMS })
+  expect(nudgeOf(r)).toMatch(/no ETA yet/)
+
+  // Once an ETA is set, the next call carries no reminder.
+  await $.tool.call({ tool: PROGRESS, eta_seconds: 60 })
+  const quiet = await $.tool.call({ tool: 'Bash', command: 'ls' })
+  expect(nudgeOf(quiet)).toBe('')
+})
+
+test('a bar that stops moving gets a reminder', async ($, on) => {
+  on('tool.call', () => ({ result: {} }))
+  on('clock.now', () => ({ value: 1_000_000 }))
+  await $.tool.call({ tool: PLAN, items: ITEMS })
+  await $.tool.call({ tool: PROGRESS, eta_seconds: 600 })
+
+  const calls = []
+  for (let i = 0; i < 4; i++) calls.push(nudgeOf(await $.tool.call({ tool: 'Bash', command: 'ls' })))
+  expect(calls.slice(0, 3)).toEqual(['', '', ''])
+  expect(calls[3]).toMatch(/has not moved/)
+})
+
+test('an ETA that ran out asks for a new one, once', async ($, on) => {
+  let now = 1_000_000
+  on('tool.call', () => ({ result: {} }))
+  on('clock.now', () => ({ value: now }))
+  await $.tool.call({ tool: PLAN, items: ITEMS })
+  await $.tool.call({ tool: PROGRESS, eta_seconds: 10 })
+
+  now += 20_000
+  expect(nudgeOf(await $.tool.call({ tool: 'Bash', command: 'ls' }))).toMatch(/ETA you gave has passed/)
+  expect(nudgeOf(await $.tool.call({ tool: 'Bash', command: 'ls' }))).toBe('')
+})
+
+test('several steps with no task list and no bar get one reminder', async ($, on) => {
+  on('tool.call', () => ({ result: {} }))
+  const calls = []
+  for (let i = 0; i < 5; i++) calls.push(nudgeOf(await $.tool.call({ tool: 'Bash', command: 'ls' })))
+  expect(calls.filter(c => /taking several steps/.test(c)).length).toBe(1)
+})
